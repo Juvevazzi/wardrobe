@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { parseArgs as parseCliArgs } from "node:util";
 import sharp from "sharp";
 
 const PARTS = new Set(["upperbody", "wholebody_up", "lowerbody", "accessories_up", "shoes"]);
@@ -16,20 +17,26 @@ function usage(message) {
 }
 
 function parseArgs(argv) {
-  const options = { repo: process.cwd(), dryRun: false };
-  for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index];
-    if (argument === "--help" || argument === "-h") usage();
-    if (argument === "--dry-run") { options.dryRun = true; continue; }
-    if (!["--items", "--manifest", "--modeled", "--repo"].includes(argument)) usage(`Unknown option: ${argument}`);
-    const value = argv[index + 1];
-    if (!value || value.startsWith("--")) usage(`${argument} requires a value`);
-    options[argument.slice(2)] = value;
-    index += 1;
+  let values;
+  try {
+    ({ values } = parseCliArgs({
+      args: argv,
+      options: {
+        items: { type: "string" },
+        manifest: { type: "string" },
+        modeled: { type: "string" },
+        repo: { type: "string", default: process.cwd() },
+        "dry-run": { type: "boolean", default: false },
+        help: { type: "boolean", short: "h" },
+      },
+    }));
+  } catch (error) {
+    usage(error.message);
   }
-  if (!options.items) usage("--items is required");
-  if (!options.manifest) usage("--manifest is required");
-  return options;
+  if (values.help) usage();
+  if (!values.items) usage("--items is required");
+  if (!values.manifest) usage("--manifest is required");
+  return { items: values.items, manifest: values.manifest, modeled: values.modeled, repo: values.repo, dryRun: values["dry-run"] };
 }
 
 function safeSlug(value) {
@@ -152,7 +159,6 @@ for (const item of prepared) {
     palette: [item.color, item.secondaryColor].filter(Boolean),
     tags: item.tags,
     image: assetUrl,
-    thumbnail: assetUrl,
     modeledImage: modeledUrl || existing?.modeledImage || null,
     importJobId: item.uuid,
   };

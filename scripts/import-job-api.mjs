@@ -95,9 +95,20 @@ async function cropDetectedItem(bytes, boundingBox) {
   return sharp(normalized).extract({ left, top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) }).png().toBuffer();
 }
 
+function hexToRgb(hex) {
+  return [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16));
+}
+
+function chromaChannels(hex) {
+  const target = hexToRgb(hex);
+  const keyedChannels = target.map((channel, index) => (channel > 200 ? index : null)).filter((index) => index !== null);
+  const neutralChannels = target.map((channel, index) => (channel < 55 ? index : null)).filter((index) => index !== null);
+  return { target, keyedChannels, neutralChannels };
+}
+
 function chooseChromaKey(primary = "#808080") {
   const value = HEX_COLOR.test(primary) ? primary : "#808080";
-  const source = [1, 3, 5].map((offset) => Number.parseInt(value.slice(offset, offset + 2), 16));
+  const source = hexToRgb(value);
   const candidates = [[0, 255, 0], [255, 0, 255], [0, 255, 255]];
   const selected = candidates.sort((a, b) => {
     const distance = (color) => color.reduce((total, channel, index) => total + ((channel - source[index]) ** 2), 0);
@@ -159,9 +170,7 @@ function removeKeyedSpill(data, index, keyedChannels, neutralLevel) {
 export async function processChromaBackground(bytes, key, options = {}) {
   const tolerance = cleanupTolerance(options.tolerance);
   const feather = 80;
-  const target = [1, 3, 5].map((offset) => Number.parseInt(key.slice(offset, offset + 2), 16));
-  const keyedChannels = target.map((channel, index) => channel > 200 ? index : null).filter((index) => index !== null);
-  const neutralChannels = target.map((channel, index) => channel < 55 ? index : null).filter((index) => index !== null);
+  const { target, keyedChannels, neutralChannels } = chromaChannels(key);
   const { data, info } = await sharp(bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   for (let index = 0; index < data.length; index += 4) {
     const distance = Math.sqrt(
@@ -260,9 +269,7 @@ export async function frameTransparentGarment(bytes, canvasSize = 1024, occupanc
 }
 
 async function verifyNoChromaSpill(bytes, key) {
-  const target = [1, 3, 5].map((offset) => Number.parseInt(key.slice(offset, offset + 2), 16));
-  const keyedChannels = target.map((channel, index) => channel > 200 ? index : null).filter((index) => index !== null);
-  const neutralChannels = target.map((channel, index) => channel < 55 ? index : null).filter((index) => index !== null);
+  const { target, keyedChannels, neutralChannels } = chromaChannels(key);
   const { data } = await sharp(bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   let contaminatedPixels = 0;
   let maxSpill = 0;
@@ -412,7 +419,6 @@ export function wardrobeImportApi(options = {}) {
       palette: [metadata.color, metadata.secondaryColor].filter(Boolean),
       tags: Array.isArray(metadata.tags) ? metadata.tags : [],
       image: `${LIBRARY_ASSET_ROOT}/${garmentName}`,
-      thumbnail: `${LIBRARY_ASSET_ROOT}/${garmentName}`,
       modeledImage: modeledImage || existing?.modeledImage || null,
       importJobId: job.id,
     };

@@ -153,6 +153,16 @@ function sampleImageColor(image, canvas, event) {
   return null;
 }
 
+function draftFromItem(item) {
+  return {
+    name: item.name || "",
+    part: item.part,
+    color: item.color || "#9a9286",
+    secondaryColor: item.secondaryColor || null,
+    tags: [...(item.tags || [])],
+  };
+}
+
 function GalleryItem({ item, selected, onOpen }) {
   const type = TYPE_MAP[item.part]?.singular || "wardrobe item";
 
@@ -165,12 +175,7 @@ function GalleryItem({ item, selected, onOpen }) {
       aria-pressed={selected}
       data-testid={`wardrobe-item-${item.id}`}
     >
-      <OptimizedImage
-        src={item.thumbnail || item.image}
-        alt=""
-        sizes="(max-width: 520px) calc(50vw - 16px), (max-width: 860px) calc(33vw - 18px), 180px"
-        breakpoints={[120, 180, 240, 320, 480]}
-      />
+      <OptimizedImage src={item.image} alt="" />
     </button>
   );
 }
@@ -343,7 +348,7 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
   const [sampling, setSampling] = useState(null);
   const [sampleStatus, setSampleStatus] = useState("");
   const [palette, setPalette] = useState(item.palette || []);
-  const [draft, setDraft] = useState({ name: item.name || "", part: item.part, color: item.color || "#9a9286", secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])] });
+  const [draft, setDraft] = useState(() => draftFromItem(item));
   const [shaking, setShaking] = useState(false);
   const [closeBlocked, setCloseBlocked] = useState(false);
   const type = TYPE_MAP[item.part]?.singular || "Wardrobe item";
@@ -411,11 +416,11 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
     setSampling(null);
     setSampleStatus("");
     setPalette(item.palette || []);
-    setDraft({ name: item.name || "", part: item.part, color: item.color || "#9a9286", secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])] });
+    setDraft(draftFromItem(item));
   }, [item]);
 
   const cancelEditing = () => {
-    setDraft({ name: item.name || "", part: item.part, color: item.color || "#9a9286", secondaryColor: item.secondaryColor || null, tags: [...(item.tags || [])] });
+    setDraft(draftFromItem(item));
     setSampling(null);
     setSampleStatus("");
     onClose();
@@ -456,8 +461,6 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
         ref={imageRef}
         src={item.image}
         alt={`Selected ${type.toLowerCase()}`}
-        sizes="(max-width: 520px) 40vw, 300px"
-        breakpoints={[160, 240, 320, 480, 640]}
         priority
         onLoad={handleImageLoad}
         onClick={handleImageClick}
@@ -480,9 +483,6 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
             className="modeled-hero-photo"
             src={item.modeledImage}
             alt={`${draft.name || type} worn by a model`}
-            sizes="(max-width: 860px) 100vw, 520px"
-            breakpoints={[320, 480, 640, 800, 1040, 1280]}
-            quality={82}
             priority
           />
           <div className="viewer-heading modeled-heading">
