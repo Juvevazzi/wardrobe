@@ -3,7 +3,7 @@ import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 
 import path from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import sharp from "sharp";
-import { CATEGORIES } from "../src/shared/categories.mjs";
+import { CATEGORIES, SEASONS } from "../src/shared/categories.mjs";
 
 const API_ROOT = "/api/import/jobs";
 const ASSET_ROOT = "/api/import/assets";
@@ -14,6 +14,7 @@ const OUTFIT_JOB_ASSET_ROOT = "/api/import/outfit-job-assets";
 const STAGES = new Set(["crop", "garment"]);
 const DECISIONS = new Set(["approve", "reject"]);
 const PARTS = new Set(CATEGORIES.map((category) => category.id));
+const SEASON_IDS = new Set(SEASONS.map((season) => season.id));
 const CATEGORY_LABELS = Object.fromEntries(CATEGORIES.map((category) => [category.id, category]));
 const LOOK_CATEGORY_RANK = { upperbody: 0, wholebody_up: 0, lowerbody: 1, accessories_up: 2, shoes: 3 };
 const MAX_LOOK_GARMENTS = 6;
@@ -143,6 +144,7 @@ export function normalizeMetadata(value = {}) {
     part: PARTS.has(metadata.part) ? metadata.part : "upperbody",
     color,
     secondaryColor,
+    season: SEASON_IDS.has(metadata.season) ? metadata.season : null,
     tags: Array.isArray(metadata.tags) ? metadata.tags.filter((tag) => typeof tag === "string").map((tag) => tag.trim().toLowerCase().slice(0, 40)).filter(Boolean).slice(0, 12) : [],
     boundingBox: normalizeBoundingBox(metadata.boundingBox),
   };
@@ -718,6 +720,7 @@ async function persistImported(job) {
     part: metadata.part || "upperbody",
     color: metadata.color || "#d8d0c2",
     secondaryColor: metadata.secondaryColor || null,
+    season: SEASON_IDS.has(metadata.season) ? metadata.season : null,
     palette: [metadata.color, metadata.secondaryColor].filter(Boolean),
     tags: Array.isArray(metadata.tags) ? metadata.tags : [],
     image: `${LIBRARY_ASSET_ROOT}/${garmentName}`,
@@ -952,7 +955,7 @@ async function handler(req, res, next) {
       if (!input.metadata || typeof input.metadata !== "object" || Array.isArray(input.metadata)) throw Object.assign(new Error("metadata must be an object"), { status: 400 });
       const normalized = normalizeMetadata({ ...records[index], ...input.metadata });
       const pricePaid = "pricePaid" in input ? normalizePricePaid(input.pricePaid) : (records[index].pricePaid ?? null);
-      const updated = { ...records[index], name: normalized.name, part: normalized.part, color: normalized.color, secondaryColor: normalized.secondaryColor, tags: normalized.tags, pricePaid };
+      const updated = { ...records[index], name: normalized.name, part: normalized.part, color: normalized.color, secondaryColor: normalized.secondaryColor, season: normalized.season, tags: normalized.tags, pricePaid };
       const next = [...records];
       next[index] = updated;
       await atomicJson(importedFile, next);

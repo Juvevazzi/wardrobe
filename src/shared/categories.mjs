@@ -5,3 +5,10 @@ export const CATEGORIES = [
   { id: "accessories_up", label: "Accessories", singular: "Accessory" },
   { id: "shoes", label: "Shoes", singular: "Shoes" },
 ];
+
+export const SEASONS = [
+  { id: "spring", label: "Spring" },
+  { id: "summer", label: "Summer" },
+  { id: "fall", label: "Fall" },
+  { id: "winter", label: "Winter" },
+];
