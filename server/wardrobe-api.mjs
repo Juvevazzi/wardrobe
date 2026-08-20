@@ -1,5 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import sharp from "sharp";
@@ -11,7 +11,6 @@ const LIBRARY_ASSET_ROOT = "/api/import/library";
 const OUTFIT_ASSET_ROOT = "/api/import/outfits";
 const OUTFIT_JOB_API = "/api/import/outfit-jobs";
 const OUTFIT_JOB_ASSET_ROOT = "/api/import/outfit-job-assets";
-const REFERENCE_IMAGE_ASSET_ROOT = "/api/import/reference-images";
 const STAGES = new Set(["crop", "garment"]);
 const DECISIONS = new Set(["approve", "reject"]);
 const PARTS = new Set(CATEGORIES.map((category) => category.id));
@@ -620,8 +619,6 @@ let cacheDir;
 let outfitsFile;
 let outfitAssetDir;
 let outfitJobsDir;
-let profileFile;
-let referenceImageDir;
 let promptOverrides = {};
 
 function configure({ env: nextEnv, root: nextRoot, garmentPrompt }) {
@@ -637,8 +634,6 @@ function configure({ env: nextEnv, root: nextRoot, garmentPrompt }) {
   outfitAssetDir = path.join(dataDir, "outfit-images");
   outfitJobsDir = path.join(dataDir, "outfit-jobs");
   cacheDir = path.join(dataDir, "cache");
-  profileFile = path.join(dataDir, "profile.json");
-  referenceImageDir = path.join(dataDir, "reference-images");
 }
 
 function setting(name, fallback = "") {
@@ -651,60 +646,19 @@ function apiBaseUrl() {
 
 async function setupStatus() {
   const hasApiKey = Boolean(setting("OPENAI_API_KEY").trim());
-  const profile = await loadProfile();
+  const referenceSetting = setting("WARDROBE_MODEL_REFERENCE", "data/model-reference.png");
+  const referencePath = path.resolve(root, referenceSetting);
+  let hasModelReference = false;
+  try {
+    hasModelReference = (await stat(referencePath)).isFile();
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
   return {
     ready: hasApiKey,
     hasApiKey,
-    hasActiveReferenceImage: Boolean(profile.activeReferenceImageId),
-  };
-}
-
-function normalizeProfile(parsed = {}) {
-  const basicInfo = parsed.basicInfo && typeof parsed.basicInfo === "object" ? parsed.basicInfo : {};
-  return {
-    basicInfo: {
-      name: typeof basicInfo.name === "string" ? basicInfo.name : "",
-      notes: typeof basicInfo.notes === "string" ? basicInfo.notes : "",
-    },
-    referenceImages: Array.isArray(parsed.referenceImages) ? parsed.referenceImages : [],
-    activeReferenceImageId: typeof parsed.activeReferenceImageId === "string" ? parsed.activeReferenceImageId : null,
-  };
-}
-
-// One-time migration: adopt the legacy env-configured reference photo as the first
-// reference image, so upgrading from the single-file setup doesn't break generation.
-// Runs once (profile.json is written either way) and never again after that.
-async function migrateLegacyReference() {
-  const profile = normalizeProfile({});
-  const legacyPath = path.resolve(root, setting("WARDROBE_MODEL_REFERENCE", "data/model-reference.png"));
-  try {
-    const data = await readFile(legacyPath);
-    const id = randomUUID();
-    const filename = `${id}.png`;
-    await mkdir(referenceImageDir, { recursive: true });
-    await writeFile(path.join(referenceImageDir, filename), data);
-    profile.referenceImages.push({ id, filename, label: "", createdAt: new Date().toISOString() });
-    profile.activeReferenceImageId = id;
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-  await atomicJson(profileFile, profile);
-  return profile;
-}
-
-async function loadProfile() {
-  try {
-    return normalizeProfile(JSON.parse(await readFile(profileFile, "utf8")));
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-  return migrateLegacyReference();
-}
-
-function publicProfile(profile) {
-  return {
-    ...profile,
-    referenceImages: profile.referenceImages.map((image) => ({ ...image, image: `${REFERENCE_IMAGE_ASSET_ROOT}/${image.filename}` })),
+    hasModelReference,
+    modelReference: referenceSetting,
   };
 }
 
@@ -893,10 +847,14 @@ async function generateLook(job) {
     try {
       const key = setting("OPENAI_API_KEY");
       if (!key) throw new Error("OPENAI_API_KEY is not configured");
-      const profile = await loadProfile();
-      const activeImage = profile.referenceImages.find((image) => image.id === profile.activeReferenceImageId);
-      if (!activeImage) throw new Error("No active reference image is set. Add one in Profile.");
-      const modelData = await readFile(path.join(referenceImageDir, activeImage.filename));
+      const modelPath = path.resolve(root, setting("WARDROBE_MODEL_REFERENCE", "data/model-reference.png"));
+      let modelData;
+      try {
+        modelData = await readFile(modelPath);
+      } catch (error) {
+        if (error.code === "ENOENT") throw new Error(`Model reference not found at ${modelPath}. Set WARDROBE_MODEL_REFERENCE or add data/model-reference.png.`, { cause: error });
+        throw error;
+      }
       const model = { data: modelData, mime: "image/png", name: "model.png" };
       const records = await loadImported();
       const garments = current.garmentIds.map((id) => records.find((record) => record.id === id));
@@ -987,52 +945,6 @@ async function handler(req, res, next) {
     if (url.pathname === "/api/import/config" && req.method === "GET") {
       return json(res, 200, await setupStatus());
     }
-    if (url.pathname === "/api/import/profile" && req.method === "GET") {
-      return json(res, 200, publicProfile(await loadProfile()));
-    }
-    if (url.pathname === "/api/import/profile" && req.method === "PATCH") {
-      const profile = await loadProfile();
-      const input = await body(req);
-      if (input.basicInfo && typeof input.basicInfo === "object" && !Array.isArray(input.basicInfo)) {
-        profile.basicInfo = {
-          name: typeof input.basicInfo.name === "string" ? input.basicInfo.name.trim().slice(0, 120) : profile.basicInfo.name,
-          notes: typeof input.basicInfo.notes === "string" ? input.basicInfo.notes.trim().slice(0, 2000) : profile.basicInfo.notes,
-        };
-      }
-      if ("activeReferenceImageId" in input) {
-        const nextId = input.activeReferenceImageId;
-        if (nextId !== null && !profile.referenceImages.some((image) => image.id === nextId)) {
-          throw Object.assign(new Error("Unknown reference image"), { status: 400 });
-        }
-        profile.activeReferenceImageId = nextId;
-      }
-      await atomicJson(profileFile, profile);
-      return json(res, 200, publicProfile(profile));
-    }
-    if (url.pathname === "/api/import/profile/reference-images" && req.method === "POST") {
-      const profile = await loadProfile();
-      const input = await body(req);
-      const image = decodeImage(input);
-      const id = randomUUID();
-      const filename = `${id}.png`;
-      await mkdir(referenceImageDir, { recursive: true });
-      await writeFile(path.join(referenceImageDir, filename), await normalizeImage(image.data));
-      profile.referenceImages.push({ id, filename, label: "", createdAt: new Date().toISOString() });
-      if (!profile.activeReferenceImageId) profile.activeReferenceImageId = id;
-      await atomicJson(profileFile, profile);
-      return json(res, 201, publicProfile(profile));
-    }
-    const referenceImageMatch = url.pathname.match(/^\/api\/import\/profile\/reference-images\/([a-f0-9-]{36})$/i);
-    if (referenceImageMatch && req.method === "DELETE") {
-      const profile = await loadProfile();
-      const index = profile.referenceImages.findIndex((image) => image.id === referenceImageMatch[1]);
-      if (index === -1) return json(res, 404, { error: "Reference image not found" });
-      const [removed] = profile.referenceImages.splice(index, 1);
-      await rm(path.join(referenceImageDir, removed.filename), { force: true });
-      if (profile.activeReferenceImageId === removed.id) profile.activeReferenceImageId = profile.referenceImages[0]?.id ?? null;
-      await atomicJson(profileFile, profile);
-      return json(res, 200, publicProfile(profile));
-    }
     const wardrobeItemMatch = url.pathname.match(/^\/api\/import\/wardrobe\/(import-[a-f0-9-]{36})$/i);
     if (wardrobeItemMatch && req.method === "PATCH") {
       const id = wardrobeItemMatch[1];
@@ -1117,15 +1029,6 @@ async function handler(req, res, next) {
       res.setHeader("Content-Type", file.endsWith(".webp") ? "image/webp" : "image/png");
       return res.end(await readFile(file));
     }
-    const referenceImageAssetMatch = url.pathname.match(/^\/api\/import\/reference-images\/([\w.-]+)$/i);
-    if (referenceImageAssetMatch && req.method === "GET") {
-      const profile = await loadProfile();
-      const known = new Set(profile.referenceImages.map((image) => image.filename));
-      if (!known.has(referenceImageAssetMatch[1])) return json(res, 404, { error: "Not found" });
-      res.setHeader("Cache-Control", "no-store");
-      res.setHeader("Content-Type", "image/png");
-      return res.end(await readFile(path.join(referenceImageDir, referenceImageAssetMatch[1])));
-    }
     if (url.pathname === "/api/import/outfits" && req.method === "GET") {
       const outfits = await loadOutfits();
       return json(res, 200, outfits.map((outfit) => ({ ...outfit, image: outfit.image ? `${OUTFIT_ASSET_ROOT}/${filenameFromUrl(outfit.image)}` : null })));
@@ -1171,12 +1074,12 @@ async function handler(req, res, next) {
     }
     if (url.pathname === OUTFIT_JOB_API && req.method === "POST") {
       const setup = await setupStatus();
-      if (!setup.hasApiKey || !setup.hasActiveReferenceImage) {
+      if (!setup.hasApiKey || !setup.hasModelReference) {
         const missing = [
           !setup.hasApiKey && "OPENAI_API_KEY in .env",
-          !setup.hasActiveReferenceImage && "a reference photo in Profile",
+          !setup.hasModelReference && `a PNG photo of yourself at ${setup.modelReference}`,
         ].filter(Boolean).join(" and ");
-        return json(res, 503, { error: `Setup required: add ${missing}.` });
+        return json(res, 503, { error: `Setup required: add ${missing}, then restart the app.` });
       }
       const input = await body(req);
       const requestedIds = Array.isArray(input.garmentIds) ? input.garmentIds.filter((id) => typeof id === "string") : [];

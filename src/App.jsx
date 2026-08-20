@@ -3,6 +3,7 @@ import { Check, Plus, Trash, X } from "@phosphor-icons/react";
 import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OutfitBuilder } from "./outfit-flow.jsx";
 import { ProfileView } from "./profile-flow.jsx";
+import { OutfitBuilder } from "./outfit-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { ErrorBoundary } from "./ErrorBoundary.jsx";
 import { CATEGORIES, SEASONS } from "./shared/categories.mjs";
@@ -848,105 +849,41 @@ function Wardrobe() {
   return (
     <div className={`app-shell${selectedItem && view === "wardrobe" ? " has-selection" : ""}`}>
       <main className="gallery-pane">
-        <div className="view-tabs" role="tablist" aria-label="Wardrobe views">
-          <button type="button" role="tab" aria-selected={view === "wardrobe"} className={view === "wardrobe" ? "active" : ""} onClick={() => setView("wardrobe")}>Wardrobe</button>
-          <button type="button" role="tab" aria-selected={view === "outfits"} className={view === "outfits" ? "active" : ""} onClick={() => setView("outfits")}>Outfits</button>
-          <button type="button" role="tab" aria-selected={view === "profile"} className={view === "profile" ? "active" : ""} onClick={() => setView("profile")}>Profile</button>
-        </div>
-
-        {view === "wardrobe" ? (
-          <>
-            <header className="gallery-header">
-              <div className="gallery-meta-row">
-                <p className="piece-count">{items.length} {items.length === 1 ? "piece" : "pieces"}</p>
-                <div className="backup-actions">
-                  <button type="button" className="secondary-button" onClick={() => setShowGaps((current) => !current)} aria-pressed={showGaps}>
-                    {showGaps ? "Hide gaps" : "Show gaps"}
-                  </button>
-                  <a className="secondary-button" href="/api/import/export" download>Export backup</a>
-                  <button type="button" className="secondary-button" onClick={() => importInputRef.current?.click()} disabled={importing}>
-                    {importing ? "Importing…" : "Import backup"}
-                  </button>
-                  <input ref={importInputRef} type="file" accept=".gz,.tgz,application/gzip" hidden onChange={handleImportFile} />
-                </div>
-              </div>
-              {showGaps && <GapsPanel items={items} />}
-              <nav className="category-nav" aria-label="Filter wardrobe by item type">
-                {TYPES.map((type) => (
-                  <button
-                    key={type.id}
-                    type="button"
-                    className={activeType === type.id ? "active" : ""}
-                    onClick={() => chooseType(type.id)}
-                    aria-pressed={activeType === type.id}
-                  >
-                    {type.label}
-                  </button>
-                ))}
-              </nav>
-              {!!items.length && (
-                <div className="search-filters">
-                  {!!availableTags.length && (
-                    <div className="tag-filter" aria-label="Filter by detail tag">
-                      {availableTags.map((tag) => (
-                        <button
-                          key={tag}
-                          type="button"
-                          className={activeTags.includes(tag) ? "active" : ""}
-                          onClick={() => toggleTag(tag)}
-                          aria-pressed={activeTags.includes(tag)}
-                        >
-                          {tag}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <label className="color-filter">
-                    <span>Color</span>
-                    <input type="color" value={activeColor || "#9a9286"} onChange={(event) => setActiveColor(event.target.value)} aria-label="Filter by similar color" />
-                    {activeColor && <button type="button" onClick={() => setActiveColor(null)}>Clear</button>}
-                  </label>
-                  <div className="tag-filter" aria-label="Filter by season">
-                    {SEASON_FILTERS.map((season) => (
-                      <button
-                        key={season.id}
-                        type="button"
-                        className={activeSeason === season.id ? "active" : ""}
-                        onClick={() => setActiveSeason(season.id)}
-                        aria-pressed={activeSeason === season.id}
-                      >
-                        {season.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </header>
+        <header className="gallery-header">
+          <div className="gallery-meta-row">
+            <p className="piece-count">{items.length} {items.length === 1 ? "piece" : "pieces"}</p>
+          </div>
+          <nav className="category-nav" aria-label="Filter wardrobe by item type">
+            {TYPES.map((type) => (
+              <button
+                key={type.id}
+                type="button"
+                className={activeType === type.id ? "active" : ""}
+                onClick={() => chooseType(type.id)}
+                aria-pressed={activeType === type.id}
+              >
+                {type.label}
+              </button>
+            ))}
+          </nav>
+        </header>
 
             {error && <p className="status error">{error}</p>}
             {!error && loading && <p className="status">Loading wardrobe</p>}
             {!error && !loading && !items.length && <p className="status empty">Drop, paste, or add a photo to import your first piece.</p>}
             {!error && !loading && !!items.length && !visibleItems.length && <p className="status empty">No items match these filters.</p>}
 
-            {!!visibleItems.length && (
-              <section className="gallery-grid" aria-label={`${TYPE_MAP[activeType]?.label || "All"} wardrobe items`}>
-                {visibleItems.map((item) => (
-                  <GalleryItem
-                    key={item.id}
-                    item={item}
-                    selected={selectedId === item.id}
-                    onOpen={setSelectedId}
-                  />
-                ))}
-              </section>
-            )}
-          </>
-        ) : view === "outfits" ? (
-          <div className="outfits-pane">
-            <OutfitsView items={items} />
-          </div>
-        ) : (
-          <ProfileView />
+        {!!items.length && (
+          <section className="gallery-grid" aria-label={`${TYPE_MAP[activeType]?.label || "All"} wardrobe items`}>
+            {visibleItems.map((item) => (
+              <GalleryItem
+                key={item.id}
+                item={item}
+                selected={selectedId === item.id}
+                onOpen={setSelectedId}
+              />
+            ))}
+          </section>
         )}
       </main>
 
