@@ -4,7 +4,7 @@ import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OutfitBuilder } from "./outfit-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { ErrorBoundary } from "./ErrorBoundary.jsx";
-import { CATEGORIES } from "./shared/categories.mjs";
+import { CATEGORIES, SEASONS } from "./shared/categories.mjs";
 import { wardrobeGaps } from "./shared/wardrobe-insights.mjs";
 import { suggestOutfitsForWeather, weatherBucket } from "./shared/weather.mjs";
 
@@ -12,6 +12,8 @@ const TYPES = [{ id: "all", label: "All" }, ...CATEGORIES];
 
 const TYPE_MAP = Object.fromEntries(TYPES.map((type) => [type.id, type]));
 const TYPE_ORDER = Object.fromEntries(TYPES.slice(1).map((type, index) => [type.id, index]));
+
+const SEASON_FILTERS = [{ id: "all", label: "All" }, ...SEASONS, { id: "unsorted", label: "Unsorted" }];
 
 function rgbToHex(red, green, blue) {
   return `#${[red, green, blue].map((value) => Math.max(0, Math.min(255, value)).toString(16).padStart(2, "0")).join("")}`;
@@ -122,6 +124,7 @@ function draftFromItem(item) {
     part: item.part,
     color: item.color || "#9a9286",
     secondaryColor: item.secondaryColor || null,
+    season: item.season || null,
     tags: [...(item.tags || [])],
     pricePaid: item.pricePaid != null ? String(item.pricePaid) : "",
   };
@@ -326,6 +329,14 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
       </label>
 
       <label className="field">
+        <span>Season</span>
+        <select value={draft.season || ""} onChange={(event) => setDraft((current) => ({ ...current, season: event.target.value || null }))}>
+          <option value="">Unsorted</option>
+          {SEASONS.map((season) => <option value={season.id} key={season.id}>{season.label}</option>)}
+        </select>
+      </label>
+
+      <label className="field">
         <span>Price paid</span>
         <input
           type="number"
@@ -414,6 +425,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onLogWear, onUndoWear }) 
       part: draft.part,
       color: draft.color?.toLowerCase() || null,
       secondaryColor: draft.secondaryColor?.toLowerCase() || null,
+      season: draft.season || null,
       tags: normalizedTags(draft.tags),
       pricePaid: draft.pricePaid.trim(),
     }) !== JSON.stringify({
@@ -421,6 +433,7 @@ function ItemViewer({ item, onClose, onSave, onDelete, onLogWear, onUndoWear }) 
       part: item.part,
       color: item.color?.toLowerCase() || null,
       secondaryColor: item.secondaryColor?.toLowerCase() || null,
+      season: item.season || null,
       tags: normalizedTags(item.tags || []),
       pricePaid: item.pricePaid != null ? String(item.pricePaid) : "",
     });
@@ -706,6 +719,7 @@ function Wardrobe() {
   const [activeType, setActiveType] = useState("all");
   const [activeTags, setActiveTags] = useState([]);
   const [activeColor, setActiveColor] = useState(null);
+  const [activeSeason, setActiveSeason] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -735,6 +749,8 @@ function Wardrobe() {
       filtered = filtered.filter((item) => [item.color, item.secondaryColor].filter(Boolean)
         .some((color) => colorDistance(hexToRgb(color), target) <= COLOR_MATCH_THRESHOLD));
     }
+    if (activeSeason === "unsorted") filtered = filtered.filter((item) => !item.season);
+    else if (activeSeason !== "all") filtered = filtered.filter((item) => item.season === activeSeason);
     return [...filtered].sort((a, b) => {
       if (activeType === "all") {
         const typeDifference = (TYPE_ORDER[a.part] ?? 99) - (TYPE_ORDER[b.part] ?? 99);
@@ -742,7 +758,7 @@ function Wardrobe() {
       }
       return a.id.localeCompare(b.id);
     });
-  }, [activeType, activeTags, activeColor, items]);
+  }, [activeType, activeTags, activeColor, activeSeason, items]);
 
   const chooseType = (typeId) => {
     setActiveType(typeId);
@@ -779,7 +795,7 @@ function Wardrobe() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          metadata: { name: updatedItem.name, part: updatedItem.part, color: updatedItem.color, secondaryColor: updatedItem.secondaryColor, tags: updatedItem.tags },
+          metadata: { name: updatedItem.name, part: updatedItem.part, color: updatedItem.color, secondaryColor: updatedItem.secondaryColor, season: updatedItem.season, tags: updatedItem.tags },
           pricePaid,
         }),
       });
@@ -888,6 +904,19 @@ function Wardrobe() {
                     <input type="color" value={activeColor || "#9a9286"} onChange={(event) => setActiveColor(event.target.value)} aria-label="Filter by similar color" />
                     {activeColor && <button type="button" onClick={() => setActiveColor(null)}>Clear</button>}
                   </label>
+                  <div className="tag-filter" aria-label="Filter by season">
+                    {SEASON_FILTERS.map((season) => (
+                      <button
+                        key={season.id}
+                        type="button"
+                        className={activeSeason === season.id ? "active" : ""}
+                        onClick={() => setActiveSeason(season.id)}
+                        aria-pressed={activeSeason === season.id}
+                      >
+                        {season.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </header>

@@ -27,7 +27,7 @@ test("normalizeBoundingBox falls back per-field for non-numeric values", () => {
 });
 
 test("normalizeMetadata defaults an empty or malformed record", () => {
-  const expected = { name: "New piece", part: "upperbody", color: "#d8d0c2", secondaryColor: null, tags: [], boundingBox: { x: 0, y: 0, width: 1000, height: 1000 } };
+  const expected = { name: "New piece", part: "upperbody", color: "#d8d0c2", secondaryColor: null, season: null, tags: [], boundingBox: { x: 0, y: 0, width: 1000, height: 1000 } };
   assert.deepEqual(normalizeMetadata(), expected);
   assert.deepEqual(normalizeMetadata({}), expected);
   assert.deepEqual(normalizeMetadata(null), expected);
@@ -44,6 +44,12 @@ test("normalizeMetadata validates and lowercases hex colors, rejecting invalid o
 test("normalizeMetadata falls back for an unknown part", () => {
   assert.equal(normalizeMetadata({ part: "shoes" }).part, "shoes");
   assert.equal(normalizeMetadata({ part: "hat" }).part, "upperbody");
+});
+
+test("normalizeMetadata validates season, falling back to null for unknown values", () => {
+  assert.equal(normalizeMetadata({ season: "winter" }).season, "winter");
+  assert.equal(normalizeMetadata({ season: "monsoon" }).season, null);
+  assert.equal(normalizeMetadata({}).season, null);
 });
 
 test("normalizeMetadata trims and length-limits the name, falling back when empty", () => {
