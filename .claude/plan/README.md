@@ -10,6 +10,7 @@ A sequenced plan for the issues and features identified in the code review, spli
 | 3 | [03-single-source-of-truth.md](./03-single-source-of-truth.md) | Server-owned data, kill localStorage | ~1 evening |
 | 4 | [04-performance.md](./04-performance.md) | Thumbnails, WebP, polling | 2–3 evenings |
 | 5 | [05-features.md](./05-features.md) | Export, search, wear tracking, outfits | Ongoing |
+| 6 | [06-profile-and-reference-images.md](./06-profile-and-reference-images.md) | Profile UI, multiple reference images | 1–2 evenings |
 
 ## Sequencing rationale
 
@@ -32,6 +33,8 @@ Phase 0 ──► Phase 1 ──► Phase 2 ──► Phase 3 ──► 5.2 ─�
 ```
 
 Phase 4 can run in parallel with Phase 3 — they touch different files. Everything in Phase 5 depends on Phase 3 for persistence.
+
+Phase 6 only needs Phase 1 and Phase 3, both already done — it can run any time, independent of where Phase 5 items stand.
 
 ## Suggested first PR
 

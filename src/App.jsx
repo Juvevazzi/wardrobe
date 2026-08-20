@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Plus, Trash, X } from "@phosphor-icons/react";
 import { WardrobeImportFlow } from "./import-flow.jsx";
 import { OutfitBuilder } from "./outfit-flow.jsx";
+import { ProfileView } from "./profile-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { ErrorBoundary } from "./ErrorBoundary.jsx";
 import { CATEGORIES, SEASONS } from "./shared/categories.mjs";
@@ -850,6 +851,7 @@ function Wardrobe() {
         <div className="view-tabs" role="tablist" aria-label="Wardrobe views">
           <button type="button" role="tab" aria-selected={view === "wardrobe"} className={view === "wardrobe" ? "active" : ""} onClick={() => setView("wardrobe")}>Wardrobe</button>
           <button type="button" role="tab" aria-selected={view === "outfits"} className={view === "outfits" ? "active" : ""} onClick={() => setView("outfits")}>Outfits</button>
+          <button type="button" role="tab" aria-selected={view === "profile"} className={view === "profile" ? "active" : ""} onClick={() => setView("profile")}>Profile</button>
         </div>
 
         {view === "wardrobe" ? (
@@ -939,10 +941,12 @@ function Wardrobe() {
               </section>
             )}
           </>
-        ) : (
+        ) : view === "outfits" ? (
           <div className="outfits-pane">
             <OutfitsView items={items} />
           </div>
+        ) : (
+          <ProfileView />
         )}
       </main>
 

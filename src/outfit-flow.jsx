@@ -103,7 +103,7 @@ export function OutfitBuilder({ open, onClose, items, onCreated }) {
     finally { setBusy(false); }
   };
 
-  const setupRequired = setup && (!setup.hasApiKey || !setup.hasModelReference);
+  const setupRequired = setup && (!setup.hasApiKey || !setup.hasActiveReferenceImage);
   const status = job?.stages?.look?.status;
   const isProcessing = status && PROCESSING_STATUSES.includes(status);
   const isReview = status === "review";
@@ -126,7 +126,7 @@ export function OutfitBuilder({ open, onClose, items, onCreated }) {
           <div className="import-drop-target import-setup-warning">
             <WarningCircle size={30} />
             <h2>Setup required</h2>
-            <p>Add your OpenAI API key to <code>.env</code> and a PNG reference photo of yourself at <code>{setup.modelReference || "data/model-reference.png"}</code>, then restart the app.</p>
+            <p>Add your OpenAI API key to <code>.env</code> and a reference photo of yourself in the Profile tab.</p>
           </div>
         ) : !job ? (
           <>
