@@ -1,0 +1,10 @@
+services:
+  wardrobe:
+    build: .
+    ports:
+      - "${PORT:-4173}:4173"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
