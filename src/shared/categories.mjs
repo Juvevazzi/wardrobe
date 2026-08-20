@@ -9,6 +9,7 @@ export const CATEGORIES = [
 export const SEASONS = [
   { id: "spring", label: "Spring" },
   { id: "summer", label: "Summer" },
-  { id: "fall", label: "Fall" },
+  { id: "autumn", label: "Autumn" },
   { id: "winter", label: "Winter" },
+  { id: "all-season", label: "All Season" },
 ];
