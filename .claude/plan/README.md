@@ -11,6 +11,7 @@ A sequenced plan for the issues and features identified in the code review, spli
 | 4 | [04-performance.md](./04-performance.md) | Thumbnails, WebP, polling | 2–3 evenings |
 | 5 | [05-features.md](./05-features.md) | Export, search, wear tracking, outfits | Ongoing |
 | 6 | [06-season-filter.md](./06-season-filter.md) | Season filter (spring/summer/fall/winter) | ~1 evening |
+| 7 | [07-outfit-management.md](./07-outfit-management.md) | Delete outfits, filterable look builder, cancellable job queue | 1–2 evenings |
 
 ## Sequencing rationale
 
@@ -35,6 +36,8 @@ Phase 0 ──► Phase 1 ──► Phase 2 ──► Phase 3 ──► 5.2 ─�
 Phase 4 can run in parallel with Phase 3 — they touch different files. Everything in Phase 5 depends on Phase 3 for persistence.
 
 **Phase 6** builds on the category/colour filter UI added in 5.2, but has no hard dependency of its own — Phase 3's server-owned data already covers it.
+
+**Phase 7** builds on 5.4 (outfits exist) and reuses the filter UI 5.2/Phase 6 already built — no new dependency beyond what's already shipped.
 
 ## Suggested first PR
 
