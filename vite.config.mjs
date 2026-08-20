@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: "0.0.0.0",
-      allowedHosts: ["terminal.local"],
+      allowedHosts: env.WARDROBE_ALLOWED_HOSTS?.split(",") ?? [],
       warmup: {
         clientFiles: ["./src/main.jsx"],
       },

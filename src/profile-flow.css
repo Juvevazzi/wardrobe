@@ -1,0 +1,51 @@
+.profile-view {
+  display: grid;
+  gap: 32px;
+  max-width: 640px;
+  padding: 24px 0;
+}
+
+.profile-section h2 {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+
+.profile-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.reference-image-tile__activate {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.reference-image-tile__delete {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--import-paper);
+  color: var(--import-ink);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.reference-image-tile:hover .reference-image-tile__delete,
+.reference-image-tile:focus-within .reference-image-tile__delete {
+  opacity: 1;
+}

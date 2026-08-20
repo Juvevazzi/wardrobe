@@ -1,69 +1,35 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Plus, Trash, X } from "@phosphor-icons/react";
 import { WardrobeImportFlow } from "./import-flow.jsx";
+import { OutfitBuilder } from "./outfit-flow.jsx";
+import { ProfileView } from "./profile-flow.jsx";
 import { OptimizedImage } from "./OptimizedImage.jsx";
+import { ErrorBoundary } from "./ErrorBoundary.jsx";
+import { CATEGORIES, SEASONS } from "./shared/categories.mjs";
+import { wardrobeGaps } from "./shared/wardrobe-insights.mjs";
+import { suggestOutfitsForWeather, weatherBucket } from "./shared/weather.mjs";
 
-const STORAGE_KEY = "open-wardrobe-edits-v1";
-const DELETED_STORAGE_KEY = "open-wardrobe-deleted-v1";
-
-const TYPES = [
-  { id: "all", label: "All" },
-  { id: "upperbody", label: "Tops", singular: "Top" },
-  { id: "wholebody_up", label: "Jackets", singular: "Jacket" },
-  { id: "lowerbody", label: "Bottoms", singular: "Bottom" },
-  { id: "accessories_up", label: "Accessories", singular: "Accessory" },
-  { id: "shoes", label: "Shoes", singular: "Shoes" },
-];
+const TYPES = [{ id: "all", label: "All" }, ...CATEGORIES];
 
 const TYPE_MAP = Object.fromEntries(TYPES.map((type) => [type.id, type]));
 const TYPE_ORDER = Object.fromEntries(TYPES.slice(1).map((type, index) => [type.id, index]));
 
-
-function readEdits() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-
-function persistEdit(item) {
-  const edits = readEdits();
-  edits[item.id] = {
-    name: item.name || "",
-    part: item.part,
-    color: item.color || null,
-    secondaryColor: item.secondaryColor || null,
-    tags: item.tags || [],
-  };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(edits));
-}
-
-function removePersistedEdit(id) {
-  const edits = readEdits();
-  delete edits[id];
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(edits));
-}
-
-function readDeletedItems() {
-  try {
-    const value = JSON.parse(localStorage.getItem(DELETED_STORAGE_KEY) || "[]");
-    return new Set(Array.isArray(value) ? value : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function persistDeletedItem(id) {
-  const deleted = readDeletedItems();
-  deleted.add(id);
-  localStorage.setItem(DELETED_STORAGE_KEY, JSON.stringify([...deleted]));
-}
+const SEASON_FILTERS = [{ id: "all", label: "All" }, ...SEASONS, { id: "unsorted", label: "Unsorted" }];
 
 function rgbToHex(red, green, blue) {
   return `#${[red, green, blue].map((value) => Math.max(0, Math.min(255, value)).toString(16).padStart(2, "0")).join("")}`;
 }
+
+function hexToRgb(hex) {
+  const value = (hex || "").replace("#", "");
+  return {
+    red: Number.parseInt(value.slice(0, 2), 16) || 0,
+    green: Number.parseInt(value.slice(2, 4), 16) || 0,
+    blue: Number.parseInt(value.slice(4, 6), 16) || 0,
+  };
+}
+
+const COLOR_MATCH_THRESHOLD = 60;
 
 function colorDistance(first, second) {
   return Math.sqrt(
@@ -159,8 +125,62 @@ function draftFromItem(item) {
     part: item.part,
     color: item.color || "#9a9286",
     secondaryColor: item.secondaryColor || null,
+    season: item.season || null,
     tags: [...(item.tags || [])],
+    pricePaid: item.pricePaid != null ? String(item.pricePaid) : "",
   };
+}
+
+function LoginGate({ children }) {
+  const [status, setStatus] = useState("checking");
+  const [token, setToken] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/import/wardrobe", { cache: "no-store" })
+      .then((response) => setStatus(response.status === 401 ? "needed" : "ok"))
+      .catch(() => setStatus("ok"));
+  }, []);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    try {
+      const response = await fetch("/api/import/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      if (!response.ok) throw new Error("Incorrect access token.");
+      setStatus("ok");
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (status === "checking") return null;
+
+  if (status === "needed") {
+    return (
+      <div className="login-gate">
+        <form className="login-form" onSubmit={submit}>
+          <h1>Wardrobe</h1>
+          <label className="field">
+            <span>Access token</span>
+            <input type="password" value={token} onChange={(event) => setToken(event.target.value)} autoFocus autoComplete="current-password" />
+          </label>
+          {error && <p className="login-error" role="alert">{error}</p>}
+          <button className="primary-button" type="submit" disabled={submitting || !token}>Unlock</button>
+        </form>
+      </div>
+    );
+  }
+
+  return children;
 }
 
 function GalleryItem({ item, selected, onOpen }) {
@@ -175,7 +195,12 @@ function GalleryItem({ item, selected, onOpen }) {
       aria-pressed={selected}
       data-testid={`wardrobe-item-${item.id}`}
     >
-      <OptimizedImage src={item.image} alt="" />
+      <OptimizedImage
+        src={item.image}
+        alt=""
+        sizes="(max-width: 520px) calc(50vw - 16px), (max-width: 860px) calc(33vw - 18px), 180px"
+        breakpoints={[120, 180, 240, 320, 480]}
+      />
     </button>
   );
 }
@@ -304,6 +329,27 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
         </select>
       </label>
 
+      <label className="field">
+        <span>Season</span>
+        <select value={draft.season || ""} onChange={(event) => setDraft((current) => ({ ...current, season: event.target.value || null }))}>
+          <option value="">Unsorted</option>
+          {SEASONS.map((season) => <option value={season.id} key={season.id}>{season.label}</option>)}
+        </select>
+      </label>
+
+      <label className="field">
+        <span>Price paid</span>
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          inputMode="decimal"
+          value={draft.pricePaid}
+          onChange={(event) => setDraft((current) => ({ ...current, pricePaid: event.target.value }))}
+          placeholder="0.00"
+        />
+      </label>
+
       <fieldset className="color-field">
         <legend>Colors</legend>
         <div className="colors-editor">
@@ -340,7 +386,27 @@ function ItemEditor({ draft, setDraft, palette, sampling, setSampling, sampleSta
   );
 }
 
-function ItemViewer({ item, onClose, onSave, onDelete }) {
+function WearTracker({ item, onLogWear, onUndoWear }) {
+  const wears = item.wears || [];
+  const lastWorn = wears.length ? new Date(wears[wears.length - 1]).toLocaleDateString() : "Never";
+  const costPerWear = item.pricePaid && wears.length ? `$${(item.pricePaid / wears.length).toFixed(2)}` : "—";
+
+  return (
+    <div className="wear-tracker">
+      <div className="wear-stats">
+        <div className="wear-stat"><strong>{wears.length}</strong><span>{wears.length === 1 ? "wear" : "wears"}</span></div>
+        <div className="wear-stat"><strong>{lastWorn}</strong><span>last worn</span></div>
+        <div className="wear-stat"><strong>{costPerWear}</strong><span>cost per wear</span></div>
+      </div>
+      <div className="wear-actions">
+        <button type="button" className="secondary-button" onClick={() => onLogWear(item.id)}>Log wear today</button>
+        <button type="button" className="viewer-text-close wear-undo" onClick={() => onUndoWear(item.id)} disabled={!wears.length}>Undo last</button>
+      </div>
+    </div>
+  );
+}
+
+function ItemViewer({ item, onClose, onSave, onDelete, onLogWear, onUndoWear }) {
   const closeButtonRef = useRef(null);
   const imageRef = useRef(null);
   const samplingCanvasRef = useRef(null);
@@ -352,11 +418,6 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
   const [shaking, setShaking] = useState(false);
   const [closeBlocked, setCloseBlocked] = useState(false);
   const type = TYPE_MAP[item.part]?.singular || "Wardrobe item";
-  const hasModeledImage = Boolean(item.modeledImage);
-  const pieceRotation = useMemo(() => {
-    const hash = [...item.id].reduce((total, character) => total + character.charCodeAt(0), 0);
-    return `${(hash % 9) - 4}deg`;
-  }, [item.id]);
 
   const isDirty = useMemo(() => {
     const normalizedTags = (tags) => tags.map((tag) => tag.trim()).filter(Boolean);
@@ -365,13 +426,17 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
       part: draft.part,
       color: draft.color?.toLowerCase() || null,
       secondaryColor: draft.secondaryColor?.toLowerCase() || null,
+      season: draft.season || null,
       tags: normalizedTags(draft.tags),
+      pricePaid: draft.pricePaid.trim(),
     }) !== JSON.stringify({
       name: (item.name || "").trim(),
       part: item.part,
       color: item.color?.toLowerCase() || null,
       secondaryColor: item.secondaryColor?.toLowerCase() || null,
+      season: item.season || null,
       tags: normalizedTags(item.tags || []),
+      pricePaid: item.pricePaid != null ? String(item.pricePaid) : "",
     });
   }, [draft, item]);
 
@@ -412,12 +477,15 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
     if (!isDirty) setCloseBlocked(false);
   }, [isDirty]);
 
+  // Keyed on item.id, not item itself: a wear log/undo replaces the item object in place
+  // (same id, new reference) and must not clobber an in-progress, unsaved edit draft.
   useEffect(() => {
     setSampling(null);
     setSampleStatus("");
     setPalette(item.palette || []);
     setDraft(draftFromItem(item));
-  }, [item]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item.id]);
 
   const cancelEditing = () => {
     setDraft(draftFromItem(item));
@@ -453,14 +521,13 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
   };
 
   const garmentArtwork = (
-    <div
-      className={`viewer-art${hasModeledImage ? " viewer-art-floating" : ""}${sampling ? " sampling" : ""}`}
-      style={hasModeledImage ? { "--piece-rotation": pieceRotation } : undefined}
-    >
+    <div className={`viewer-art${sampling ? " sampling" : ""}`}>
       <OptimizedImage
         ref={imageRef}
         src={item.image}
         alt={`Selected ${type.toLowerCase()}`}
+        sizes="(max-width: 520px) 40vw, 300px"
+        breakpoints={[160, 240, 320, 480, 640]}
         priority
         onLoad={handleImageLoad}
         onClick={handleImageClick}
@@ -472,36 +539,17 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
   return (
     <div className="viewer-overlay" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && requestClose()}>
     <div className="viewer-entry">
-    <aside className={`viewer editing${hasModeledImage ? " has-modeled-image" : ""}${shaking ? " shake" : ""}`} role="dialog" aria-modal="true" aria-label="Selected wardrobe item">
+    <aside className={`viewer editing${shaking ? " shake" : ""}`} role="dialog" aria-modal="true" aria-label="Selected wardrobe item">
       <button className="viewer-icon-close" type="button" onClick={requestClose} aria-label="Close viewer" ref={closeButtonRef}>
         <X size={24} weight="light" aria-hidden="true" />
       </button>
 
-      {hasModeledImage ? (
-        <div className="modeled-hero">
-          <OptimizedImage
-            className="modeled-hero-photo"
-            src={item.modeledImage}
-            alt={`${draft.name || type} worn by a model`}
-            priority
-          />
-          <div className="viewer-heading modeled-heading">
-            <div>
-              <h2>{draft.name || TYPE_MAP[draft.part]?.singular}</h2>
-            </div>
-          </div>
-          {garmentArtwork}
+      <div className="viewer-heading">
+        <div>
+          <h2>{draft.name || TYPE_MAP[draft.part]?.singular}</h2>
         </div>
-      ) : (
-        <>
-          <div className="viewer-heading">
-            <div>
-              <h2>{draft.name || TYPE_MAP[draft.part]?.singular}</h2>
-            </div>
-          </div>
-          {garmentArtwork}
-        </>
-      )}
+      </div>
+      {garmentArtwork}
 
       <div className="viewer-details editing">
         <ItemEditor
@@ -512,6 +560,8 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
           setSampling={setSampling}
           sampleStatus={sampleStatus}
         />
+
+        <WearTracker item={item} onLogWear={onLogWear} onUndoWear={onUndoWear} />
 
         {closeBlocked && <p className="unsaved-notice" role="status">Save or cancel changes before closing.</p>}
 
@@ -532,12 +582,150 @@ function ItemViewer({ item, onClose, onSave, onDelete }) {
   );
 }
 
-export function App() {
+function GapsPanel({ items }) {
+  const { rows, notes } = useMemo(() => wardrobeGaps(items, CATEGORIES), [items]);
+
+  return (
+    <div className="gaps-panel">
+      <table className="gaps-table">
+        <thead><tr><th>Category</th><th>Light</th><th>Dark</th><th>Total</th></tr></thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.id}><td>{row.label}</td><td>{row.light}</td><td>{row.dark}</td><td>{row.total}</td></tr>
+          ))}
+        </tbody>
+      </table>
+      {notes.length
+        ? <ul className="gaps-notes">{notes.map((note) => <li key={note}>{note}</li>)}</ul>
+        : <p className="gaps-notes-empty">No obvious gaps — nice balance.</p>}
+    </div>
+  );
+}
+
+function useWeather() {
+  const [weather, setWeather] = useState(null);
+
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setWeather("unavailable");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      async ({ coords }) => {
+        try {
+          const url = `https://api.open-meteo.com/v1/forecast?latitude=${coords.latitude}&longitude=${coords.longitude}&current=temperature_2m`;
+          const response = await fetch(url);
+          if (!response.ok) throw new Error("Weather lookup failed");
+          const data = await response.json();
+          const tempC = data?.current?.temperature_2m;
+          setWeather({ tempC, bucket: weatherBucket(tempC) });
+        } catch {
+          setWeather("unavailable");
+        }
+      },
+      () => setWeather("unavailable"),
+      { timeout: 8000 },
+    );
+  }, []);
+
+  return weather;
+}
+
+function OutfitCard({ outfit, itemsById }) {
+  const garments = (outfit.garmentIds || []).map((id) => itemsById[id]).filter(Boolean);
+
+  return (
+    <article className="outfit-card">
+      <div className="outfit-card-photo">
+        <OptimizedImage
+          src={outfit.image}
+          alt={outfit.name || "Outfit"}
+          sizes="(max-width: 860px) 50vw, 320px"
+          breakpoints={[240, 320, 480, 640]}
+        />
+      </div>
+      <div className="outfit-card-body">
+        <h3>{outfit.name || "Untitled outfit"}</h3>
+        {!!outfit.occasion?.length && <p className="outfit-card-occasion">{outfit.occasion.join(" · ")}</p>}
+        {!!garments.length && (
+          <div className="outfit-card-garments">
+            {garments.map((item) => <img key={item.id} src={item.image} alt="" title={item.name} />)}
+          </div>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function OutfitsView({ items }) {
+  const [outfits, setOutfits] = useState(null);
+  const [error, setError] = useState("");
+  const [weatherFilter, setWeatherFilter] = useState(false);
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const weather = useWeather();
+
+  useEffect(() => {
+    fetch("/api/import/outfits", { cache: "no-store" })
+      .then((response) => {
+        if (!response.ok) throw new Error("Could not load outfits.");
+        return response.json();
+      })
+      .then(setOutfits)
+      .catch((requestError) => setError(requestError.message));
+  }, []);
+
+  const itemsById = useMemo(() => Object.fromEntries(items.map((item) => [item.id, item])), [items]);
+
+  const visibleOutfits = useMemo(() => {
+    if (!outfits) return [];
+    if (!weatherFilter || typeof weather !== "object" || !weather?.bucket) return outfits;
+    return suggestOutfitsForWeather(outfits, itemsById, weather.bucket);
+  }, [outfits, weatherFilter, weather, itemsById]);
+
+  if (error) return <p className="status error">{error}</p>;
+  if (outfits === null) return <p className="status">Loading outfits</p>;
+
+  return (
+    <>
+      <div className="outfits-toolbar">
+        <button type="button" className="secondary-button" onClick={() => setBuilderOpen(true)}>Create a look</button>
+      </div>
+      <OutfitBuilder
+        open={builderOpen}
+        onClose={() => setBuilderOpen(false)}
+        items={items}
+        onCreated={(outfit) => setOutfits((current) => [outfit, ...(current || [])])}
+      />
+      {typeof weather === "object" && weather?.bucket && !!outfits.length && (
+        <label className="weather-toggle">
+          <input type="checkbox" checked={weatherFilter} onChange={(event) => setWeatherFilter(event.target.checked)} />
+          <span>Suggested for today ({Math.round(weather.tempC)}°C, {weather.bucket})</span>
+        </label>
+      )}
+      {outfits.length
+        ? (
+          <section className="outfits-grid" aria-label="Generated outfits">
+            {visibleOutfits.map((outfit) => <OutfitCard key={outfit.id} outfit={outfit} itemsById={itemsById} />)}
+          </section>
+        )
+        : <p className="status empty">No outfits yet. Create one above, or ask the generate-outfits Codex skill to curate some from your wardrobe.</p>}
+    </>
+  );
+}
+
+function Wardrobe() {
   const [items, setItems] = useState([]);
+  const [view, setView] = useState("wardrobe");
+  const [showGaps, setShowGaps] = useState(false);
   const [activeType, setActiveType] = useState("all");
+  const [activeTags, setActiveTags] = useState([]);
+  const [activeColor, setActiveColor] = useState(null);
+  const [activeSeason, setActiveSeason] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef(null);
 
   useEffect(() => {
     fetch("/api/import/wardrobe", { cache: "no-store" })
@@ -545,20 +733,25 @@ export function App() {
         if (!response.ok) throw new Error("Could not load the wardrobe.");
         return response.json();
       })
-      .then((loadedItems) => {
-        const edits = readEdits();
-        const deleted = readDeletedItems();
-        const visibleItems = loadedItems.filter((item) => !deleted.has(item.id));
-        setItems(visibleItems.map((item) => ({ ...item, ...(edits[item.id] || {}) })));
-      })
+      .then(setItems)
       .catch((requestError) => setError(requestError.message))
       .finally(() => setLoading(false));
   }, []);
 
   const selectedItem = items.find((item) => item.id === selectedId) || null;
 
+  const availableTags = useMemo(() => [...new Set(items.flatMap((item) => item.tags || []))].sort(), [items]);
+
   const visibleItems = useMemo(() => {
-    const filtered = activeType === "all" ? items : items.filter((item) => item.part === activeType);
+    let filtered = activeType === "all" ? items : items.filter((item) => item.part === activeType);
+    if (activeTags.length) filtered = filtered.filter((item) => activeTags.every((tag) => (item.tags || []).includes(tag)));
+    if (activeColor) {
+      const target = hexToRgb(activeColor);
+      filtered = filtered.filter((item) => [item.color, item.secondaryColor].filter(Boolean)
+        .some((color) => colorDistance(hexToRgb(color), target) <= COLOR_MATCH_THRESHOLD));
+    }
+    if (activeSeason === "unsorted") filtered = filtered.filter((item) => !item.season);
+    else if (activeSeason !== "all") filtered = filtered.filter((item) => item.season === activeSeason);
     return [...filtered].sort((a, b) => {
       if (activeType === "all") {
         const typeDifference = (TYPE_ORDER[a.part] ?? 99) - (TYPE_ORDER[b.part] ?? 99);
@@ -566,31 +759,85 @@ export function App() {
       }
       return a.id.localeCompare(b.id);
     });
-  }, [activeType, items]);
+  }, [activeType, activeTags, activeColor, activeSeason, items]);
 
   const chooseType = (typeId) => {
     setActiveType(typeId);
     setSelectedId(null);
   };
 
-  const saveItem = (updatedItem) => {
-    setItems((current) => current.map((item) => item.id === updatedItem.id ? updatedItem : item));
-    persistEdit(updatedItem);
+  const toggleTag = (tag) => {
+    setActiveTags((current) => current.includes(tag) ? current.filter((existing) => existing !== tag) : [...current, tag]);
+  };
+
+  const handleImportFile = async (event) => {
+    const file = event.target.files[0];
+    event.target.value = "";
+    if (!file) return;
+    setImporting(true);
+    try {
+      const response = await fetch("/api/import/import", { method: "POST", body: file });
+      if (!response.ok) throw new Error("Could not import that backup file.");
+      const refreshed = await fetch("/api/import/wardrobe", { cache: "no-store" });
+      setItems(await refreshed.json());
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const saveItem = async (updatedItem) => {
+    const previousItems = items;
+    const pricePaid = updatedItem.pricePaid === "" || updatedItem.pricePaid == null ? null : Number(updatedItem.pricePaid);
+    setItems((current) => current.map((item) => item.id === updatedItem.id ? { ...updatedItem, pricePaid } : item));
+    try {
+      const response = await fetch(`/api/import/wardrobe/${updatedItem.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metadata: { name: updatedItem.name, part: updatedItem.part, color: updatedItem.color, secondaryColor: updatedItem.secondaryColor, season: updatedItem.season, tags: updatedItem.tags },
+          pricePaid,
+        }),
+      });
+      if (!response.ok) throw new Error("Could not save changes.");
+    } catch (requestError) {
+      setItems(previousItems);
+      setError(requestError.message);
+    }
+  };
+
+  const logWear = async (id) => {
+    try {
+      const response = await fetch(`/api/import/wardrobe/${id}/wears`, { method: "POST" });
+      if (!response.ok) throw new Error("Could not log wear.");
+      const updated = await response.json();
+      setItems((current) => current.map((item) => item.id === id ? updated : item));
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  };
+
+  const undoWear = async (id) => {
+    try {
+      const response = await fetch(`/api/import/wardrobe/${id}/wears`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Could not undo wear.");
+      const updated = await response.json();
+      setItems((current) => current.map((item) => item.id === id ? updated : item));
+    } catch (requestError) {
+      setError(requestError.message);
+    }
   };
 
   const deleteItem = async (id) => {
-    if (id.startsWith("import-")) {
-      try {
-        const response = await fetch(`/api/import/wardrobe/${id}`, { method: "DELETE" });
-        if (!response.ok && response.status !== 404) throw new Error("Could not delete the imported item.");
-      } catch (requestError) {
-        setError(requestError.message);
-        return;
-      }
+    try {
+      const response = await fetch(`/api/import/wardrobe/${id}`, { method: "DELETE" });
+      if (!response.ok && response.status !== 404) throw new Error("Could not delete the imported item.");
+    } catch (requestError) {
+      setError(requestError.message);
+      return;
     }
     setItems((current) => current.filter((item) => item.id !== id));
-    removePersistedEdit(id);
-    persistDeletedItem(id);
     setSelectedId(null);
   };
 
@@ -598,53 +845,127 @@ export function App() {
     setItems((current) => current.some((item) => item.id === newItem.id) ? current : [...current, newItem]);
   }, []);
 
-  const attachImportedModeledImage = useCallback((jobId, modeledImage) => {
-    const id = `import-${jobId}`;
-    setItems((current) => current.map((item) => item.id === id ? { ...item, modeledImage } : item));
-  }, []);
-
   return (
-    <div className={`app-shell${selectedItem ? " has-selection" : ""}`}>
+    <div className={`app-shell${selectedItem && view === "wardrobe" ? " has-selection" : ""}`}>
       <main className="gallery-pane">
-        <header className="gallery-header">
-          <div className="gallery-meta-row">
-            <p className="piece-count">{items.length} {items.length === 1 ? "piece" : "pieces"}</p>
+        <div className="view-tabs" role="tablist" aria-label="Wardrobe views">
+          <button type="button" role="tab" aria-selected={view === "wardrobe"} className={view === "wardrobe" ? "active" : ""} onClick={() => setView("wardrobe")}>Wardrobe</button>
+          <button type="button" role="tab" aria-selected={view === "outfits"} className={view === "outfits" ? "active" : ""} onClick={() => setView("outfits")}>Outfits</button>
+          <button type="button" role="tab" aria-selected={view === "profile"} className={view === "profile" ? "active" : ""} onClick={() => setView("profile")}>Profile</button>
+        </div>
+
+        {view === "wardrobe" ? (
+          <>
+            <header className="gallery-header">
+              <div className="gallery-meta-row">
+                <p className="piece-count">{items.length} {items.length === 1 ? "piece" : "pieces"}</p>
+                <div className="backup-actions">
+                  <button type="button" className="secondary-button" onClick={() => setShowGaps((current) => !current)} aria-pressed={showGaps}>
+                    {showGaps ? "Hide gaps" : "Show gaps"}
+                  </button>
+                  <a className="secondary-button" href="/api/import/export" download>Export backup</a>
+                  <button type="button" className="secondary-button" onClick={() => importInputRef.current?.click()} disabled={importing}>
+                    {importing ? "Importing…" : "Import backup"}
+                  </button>
+                  <input ref={importInputRef} type="file" accept=".gz,.tgz,application/gzip" hidden onChange={handleImportFile} />
+                </div>
+              </div>
+              {showGaps && <GapsPanel items={items} />}
+              <nav className="category-nav" aria-label="Filter wardrobe by item type">
+                {TYPES.map((type) => (
+                  <button
+                    key={type.id}
+                    type="button"
+                    className={activeType === type.id ? "active" : ""}
+                    onClick={() => chooseType(type.id)}
+                    aria-pressed={activeType === type.id}
+                  >
+                    {type.label}
+                  </button>
+                ))}
+              </nav>
+              {!!items.length && (
+                <div className="search-filters">
+                  {!!availableTags.length && (
+                    <div className="tag-filter" aria-label="Filter by detail tag">
+                      {availableTags.map((tag) => (
+                        <button
+                          key={tag}
+                          type="button"
+                          className={activeTags.includes(tag) ? "active" : ""}
+                          onClick={() => toggleTag(tag)}
+                          aria-pressed={activeTags.includes(tag)}
+                        >
+                          {tag}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <label className="color-filter">
+                    <span>Color</span>
+                    <input type="color" value={activeColor || "#9a9286"} onChange={(event) => setActiveColor(event.target.value)} aria-label="Filter by similar color" />
+                    {activeColor && <button type="button" onClick={() => setActiveColor(null)}>Clear</button>}
+                  </label>
+                  <div className="tag-filter" aria-label="Filter by season">
+                    {SEASON_FILTERS.map((season) => (
+                      <button
+                        key={season.id}
+                        type="button"
+                        className={activeSeason === season.id ? "active" : ""}
+                        onClick={() => setActiveSeason(season.id)}
+                        aria-pressed={activeSeason === season.id}
+                      >
+                        {season.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </header>
+
+            {error && <p className="status error">{error}</p>}
+            {!error && loading && <p className="status">Loading wardrobe</p>}
+            {!error && !loading && !items.length && <p className="status empty">Drop, paste, or add a photo to import your first piece.</p>}
+            {!error && !loading && !!items.length && !visibleItems.length && <p className="status empty">No items match these filters.</p>}
+
+            {!!visibleItems.length && (
+              <section className="gallery-grid" aria-label={`${TYPE_MAP[activeType]?.label || "All"} wardrobe items`}>
+                {visibleItems.map((item) => (
+                  <GalleryItem
+                    key={item.id}
+                    item={item}
+                    selected={selectedId === item.id}
+                    onOpen={setSelectedId}
+                  />
+                ))}
+              </section>
+            )}
+          </>
+        ) : view === "outfits" ? (
+          <div className="outfits-pane">
+            <OutfitsView items={items} />
           </div>
-          <nav className="category-nav" aria-label="Filter wardrobe by item type">
-            {TYPES.map((type) => (
-              <button
-                key={type.id}
-                type="button"
-                className={activeType === type.id ? "active" : ""}
-                onClick={() => chooseType(type.id)}
-                aria-pressed={activeType === type.id}
-              >
-                {type.label}
-              </button>
-            ))}
-          </nav>
-        </header>
-
-        {error && <p className="status error">{error}</p>}
-        {!error && loading && <p className="status">Loading wardrobe</p>}
-        {!error && !loading && !items.length && <p className="status empty">Drop, paste, or add a photo to import your first piece.</p>}
-
-        {!!items.length && (
-          <section className="gallery-grid" aria-label={`${TYPE_MAP[activeType]?.label || "All"} wardrobe items`}>
-            {visibleItems.map((item) => (
-              <GalleryItem
-                key={item.id}
-                item={item}
-                selected={selectedId === item.id}
-                onOpen={setSelectedId}
-              />
-            ))}
-          </section>
+        ) : (
+          <ProfileView />
         )}
       </main>
 
-      {selectedItem && <ItemViewer item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} />}
-      <WardrobeImportFlow onGarmentApproved={addImportedItem} onModeledApproved={attachImportedModeledImage} />
+      {selectedItem && view === "wardrobe" && (
+        <ErrorBoundary>
+          <ItemViewer item={selectedItem} onClose={() => setSelectedId(null)} onSave={saveItem} onDelete={deleteItem} onLogWear={logWear} onUndoWear={undoWear} />
+        </ErrorBoundary>
+      )}
+      <ErrorBoundary>
+        <WardrobeImportFlow onGarmentApproved={addImportedItem} />
+      </ErrorBoundary>
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <LoginGate>
+      <Wardrobe />
+    </LoginGate>
   );
 }
