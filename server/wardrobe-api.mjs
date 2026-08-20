@@ -204,8 +204,8 @@ async function cachedThumbnail(sourceFile, cacheFile, width) {
   return resized;
 }
 
-function thumbnailCacheFiles(filename) {
-  return THUMBNAIL_WIDTHS.map((width) => path.join(cacheDir, "library", `${filename}-w${width}.webp`));
+function thumbnailCacheFiles(filename, subdir = "library") {
+  return THUMBNAIL_WIDTHS.map((width) => path.join(cacheDir, subdir, `${filename}-w${width}.webp`));
 }
 
 async function removeLibraryAssets(id) {
@@ -214,6 +214,13 @@ async function removeLibraryAssets(id) {
     rm(path.join(libraryAssetDir, filename), { force: true }),
     ...thumbnailCacheFiles(filename).map((file) => rm(file, { force: true })),
   ]));
+}
+
+async function removeOutfitAssets(filename) {
+  await Promise.all([
+    rm(path.join(outfitAssetDir, filename), { force: true }),
+    ...thumbnailCacheFiles(filename, "outfits").map((file) => rm(file, { force: true })),
+  ]);
 }
 
 async function cropDetectedItem(bytes, boundingBox) {
@@ -559,7 +566,7 @@ async function withRetry(request) {
   }
 }
 
-async function openAIEdit({ key, baseUrl, model, prompt, images, size, background, quality }) {
+async function openAIEdit({ key, baseUrl, model, prompt, images, size, background, quality, signal }) {
   const form = new FormData();
   form.set("model", model);
   form.set("prompt", prompt);
@@ -572,7 +579,7 @@ async function openAIEdit({ key, baseUrl, model, prompt, images, size, backgroun
     form.append("image[]", new Blob([normalized], { type: "image/png" }), image.name?.replace(/\.[^.]+$/, ".png") || `image-${index + 1}.png`);
   }
   const response = await withRetry(() => fetch(`${baseUrl}/images/edits`, {
-    method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form,
+    method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form, signal,
   }));
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error?.message || `OpenAI image request failed (${response.status})`);
@@ -607,6 +614,7 @@ async function openAIAnalyze({ key, baseUrl, model, image, mime }) {
 // dev plugin and the standalone server) configure this module once per process with the
 // same { env, root }, so a module-level singleton is simpler than threading a context object.
 const running = new Map();
+const abortControllers = new Map();
 const DEFAULT_GENERATION_CONCURRENCY = 3;
 const generationQueue = [];
 let activeGenerations = 0;
@@ -885,6 +893,8 @@ async function generate(job) {
 async function generateLook(job) {
   const lock = `outfit:${job.id}`;
   if (running.has(lock)) return running.get(lock);
+  const controller = new AbortController();
+  abortControllers.set(job.id, controller);
   const task = runQueued(async () => {
     const current = await loadOutfitJob(job.id);
     const stage = current.stages.look;
@@ -915,11 +925,13 @@ async function generateLook(job) {
         size: "1024x1024",
         images: [model, ...garmentImages],
         prompt: stage.prompt ? `${basePrompt}\nUser regeneration direction: ${stage.prompt}` : basePrompt,
+        signal: controller.signal,
       });
       const bytes = await sharp(rendered).webp({ quality: 82 }).toBuffer();
       const output = path.join(outfitJobsDir, current.id, `look-${stage.attempts}.webp`);
       await writeFile(output, bytes);
       const fresh = await loadOutfitJob(current.id);
+      if (!fresh) return; // job was deleted/cancelled mid-generation — nothing to persist
       fresh.stages.look.status = "review";
       fresh.stages.look.assetUrl = `${OUTFIT_JOB_ASSET_ROOT}/${fresh.id}/${path.basename(output)}`;
       fresh.stages.look.updatedAt = new Date().toISOString();
@@ -927,12 +939,13 @@ async function generateLook(job) {
     } catch (error) {
       devLog("look generation failed", current.id, error);
       const fresh = await loadOutfitJob(current.id);
-      fresh.stages.look.status = "failed";
-      fresh.stages.look.error = error.message;
+      if (!fresh) return; // job was deleted/cancelled mid-generation — nothing to persist
+      fresh.stages.look.status = error.name === "AbortError" ? "cancelled" : "failed";
+      fresh.stages.look.error = error.name === "AbortError" ? "Cancelled" : error.message;
       fresh.stages.look.updatedAt = new Date().toISOString();
       await saveOutfitJob(fresh);
     }
-  }).finally(() => running.delete(lock));
+  }).finally(() => { running.delete(lock); abortControllers.delete(job.id); });
   running.set(lock, task);
   return task;
 }
@@ -1145,6 +1158,15 @@ async function handler(req, res, next) {
       res.setHeader("Content-Type", file.endsWith(".webp") ? "image/webp" : "image/png");
       return res.end(await readFile(file));
     }
+    if (outfitAssetMatch && req.method === "DELETE") {
+      const id = outfitAssetMatch[1];
+      const raw = await loadOutfitsRaw();
+      const record = raw.outfits.find((outfit) => outfit.id === id);
+      if (!record) return json(res, 404, { error: "Outfit not found" });
+      await atomicJson(outfitsFile, { ...raw, outfits: raw.outfits.filter((outfit) => outfit.id !== id) });
+      if (record.image) await removeOutfitAssets(filenameFromUrl(record.image));
+      return json(res, 200, { deleted: true, id });
+    }
     const assetMatch = url.pathname.match(/^\/api\/import\/assets\/([a-f0-9-]{36})\/([\w.-]+)$/i);
     if (assetMatch && req.method === "GET") {
       const assetJob = await loadJob(assetMatch[1]);
@@ -1216,6 +1238,7 @@ async function handler(req, res, next) {
       const jobAction = outfitJobMatch[2] || "";
       if (!jobAction && req.method === "GET") return json(res, 200, outfitJob);
       if (!jobAction && req.method === "DELETE") {
+        abortControllers.get(outfitJob.id)?.abort();
         await rm(path.join(outfitJobsDir, outfitJob.id), { recursive: true, force: true });
         return json(res, 200, { deleted: true, id: outfitJob.id });
       }
@@ -1231,11 +1254,11 @@ async function handler(req, res, next) {
           void generateLook(outfitJob);
           return json(res, 202, outfitJob);
         }
-        if (!DECISIONS.has(decision) || outfitJob.stages.look.status !== "review") throw Object.assign(new Error("Look is not ready for review"), { status: 409 });
         if (decision === "reject") {
           await rm(path.join(outfitJobsDir, outfitJob.id), { recursive: true, force: true });
           return json(res, 200, { deleted: true, id: outfitJob.id });
         }
+        if (outfitJob.stages.look.status !== "review") throw Object.assign(new Error("Look is not ready for review"), { status: 409 });
         const record = await persistOutfit(outfitJob);
         await rm(path.join(outfitJobsDir, outfitJob.id), { recursive: true, force: true });
         return json(res, 200, { outfit: record });
