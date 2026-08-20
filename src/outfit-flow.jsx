@@ -149,18 +149,20 @@ export function OutfitBuilder({ open, onClose, items, onCreated, initialJobId })
           <>
             {items.length ? (
               <>
-                <WardrobeFilters
-                  itemCount={items.length}
-                  activeType={filters.activeType}
-                  onChooseType={filters.setActiveType}
-                  availableTags={filters.availableTags}
-                  activeTags={filters.activeTags}
-                  onToggleTag={filters.toggleTag}
-                  activeColor={filters.activeColor}
-                  onColorChange={filters.setActiveColor}
-                  activeSeason={filters.activeSeason}
-                  onSeasonChange={filters.setActiveSeason}
-                />
+                <div className="look-filters">
+                  <WardrobeFilters
+                    itemCount={items.length}
+                    activeType={filters.activeType}
+                    onChooseType={filters.setActiveType}
+                    availableTags={filters.availableTags}
+                    activeTags={filters.activeTags}
+                    onToggleTag={filters.toggleTag}
+                    activeColor={filters.activeColor}
+                    onColorChange={filters.setActiveColor}
+                    activeSeason={filters.activeSeason}
+                    onSeasonChange={filters.setActiveSeason}
+                  />
+                </div>
                 {filters.visibleItems.length ? (
                   <div className="look-picker-grid">
                     {filters.visibleItems.map((item) => (

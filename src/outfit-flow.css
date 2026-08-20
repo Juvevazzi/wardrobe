@@ -2,6 +2,14 @@
   margin-bottom: 20px;
 }
 
+/* The wardrobe page's filter nav carries its own large top margin, tuned for
+   sitting under a full page header — reset it here so it fits the popover's
+   tighter rhythm instead of leaving a 70px+ gap under the modal title. */
+.look-filters .category-nav { margin: 0; }
+.look-filters .search-filters { margin: 14px 0 0; }
+.look-filters + .look-picker-grid,
+.look-filters + p { margin-top: 18px; }
+
 .look-picker-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
