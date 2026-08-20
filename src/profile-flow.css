@@ -2,7 +2,6 @@
   display: grid;
   gap: 32px;
   max-width: 640px;
-  padding: 24px 0;
 }
 
 .profile-section h2 {

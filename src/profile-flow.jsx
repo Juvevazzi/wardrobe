@@ -66,13 +66,15 @@ export function ProfileView() {
     <div className="profile-view">
       <section className="profile-section">
         <h2>Basic info</h2>
-        <div className="import-field">
-          <label htmlFor="profile-name">Name</label>
-          <input id="profile-name" value={name} onChange={(event) => setName(event.target.value)} onBlur={saveBasicInfo} placeholder="Your name" />
-        </div>
-        <div className="import-field">
-          <label htmlFor="profile-notes">Notes <span>optional</span></label>
-          <textarea id="profile-notes" rows="3" value={notes} onChange={(event) => setNotes(event.target.value)} onBlur={saveBasicInfo} placeholder="Styling notes, sizing, anything worth remembering" />
+        <div className="import-fields">
+          <div className="import-field">
+            <label htmlFor="profile-name">Name</label>
+            <input id="profile-name" value={name} onChange={(event) => setName(event.target.value)} onBlur={saveBasicInfo} placeholder="Your name" />
+          </div>
+          <div className="import-field">
+            <label htmlFor="profile-notes">Notes <span>optional</span></label>
+            <textarea id="profile-notes" rows="3" value={notes} onChange={(event) => setNotes(event.target.value)} onBlur={saveBasicInfo} placeholder="Styling notes, sizing, anything worth remembering" />
+          </div>
         </div>
       </section>
 
@@ -84,25 +86,27 @@ export function ProfileView() {
           </button>
           <input ref={inputRef} type="file" accept="image/*" multiple hidden onChange={(event) => { uploadFiles(event.target.files); event.target.value = ""; }} />
         </div>
-        <p className="import-card__detail">The starred photo is your identity when generating modeled outfit looks. Click a photo to make it the active one.</p>
-        {!profile.referenceImages.length ? (
-          <p className="status empty">Add a clear photo of yourself to start generating modeled looks.</p>
-        ) : (
-          <div className="look-picker-grid">
-            {profile.referenceImages.map((image) => {
-              const isActive = image.id === profile.activeReferenceImageId;
-              return (
-                <div className={`look-picker-tile reference-image-tile${isActive ? " is-selected" : ""}`} key={image.id}>
-                  <button type="button" className="reference-image-tile__activate" onClick={() => activate(image.id)} aria-pressed={isActive} aria-label={isActive ? "Active reference photo" : "Set as active reference photo"}>
-                    <img src={image.image} alt="" />
-                    <span className="look-picker-badge" aria-hidden="true"><Star size={12} weight="fill" /></span>
-                  </button>
-                  <button type="button" className="reference-image-tile__delete" onClick={() => remove(image.id)} aria-label="Delete this reference photo"><Trash size={14} /></button>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        <div className="import-fields">
+          <p className="import-card__detail">The starred photo is your identity when generating modeled outfit looks. Click a photo to make it the active one.</p>
+          {!profile.referenceImages.length ? (
+            <p className="status empty">Add a clear photo of yourself to start generating modeled looks.</p>
+          ) : (
+            <div className="look-picker-grid">
+              {profile.referenceImages.map((image) => {
+                const isActive = image.id === profile.activeReferenceImageId;
+                return (
+                  <div className={`look-picker-tile reference-image-tile${isActive ? " is-selected" : ""}`} key={image.id}>
+                    <button type="button" className="reference-image-tile__activate" onClick={() => activate(image.id)} aria-pressed={isActive} aria-label={isActive ? "Active reference photo" : "Set as active reference photo"}>
+                      <img src={image.image} alt="" />
+                      <span className="look-picker-badge" aria-hidden="true"><Star size={12} weight="fill" /></span>
+                    </button>
+                    <button type="button" className="reference-image-tile__delete" onClick={() => remove(image.id)} aria-label="Delete this reference photo"><Trash size={14} /></button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </section>
 
       {error && <p className="import-status is-error" role="alert">{error}</p>}
