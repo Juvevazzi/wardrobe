@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { ArrowCounterClockwise, Check, Trash, WarningCircle, X } from "@phosphor-icons/react";
 import { OptimizedImage } from "./OptimizedImage.jsx";
 import { apiRequest } from "./shared/api.mjs";
+import { useWardrobeFilters } from "./shared/wardrobe-filters.mjs";
+import { WardrobeFilters } from "./WardrobeFilters.jsx";
 import "./outfit-flow.css";
 
 const API = "/api/import/outfit-jobs";
@@ -25,7 +27,7 @@ function LookPickerTile({ item, selected, onToggle }) {
   );
 }
 
-export function OutfitBuilder({ open, onClose, items, onCreated }) {
+export function OutfitBuilder({ open, onClose, items, onCreated, initialJobId }) {
   const [setup, setSetup] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
   const [name, setName] = useState("");
@@ -33,10 +35,15 @@ export function OutfitBuilder({ open, onClose, items, onCreated }) {
   const [regenPrompt, setRegenPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const filters = useWardrobeFilters(items);
 
   useEffect(() => {
     api(CONFIG_API).then(setSetup).catch((requestError) => setSetup({ ready: false, error: requestError.message }));
   }, []);
+
+  useEffect(() => {
+    if (open && initialJobId) api(`${API}/${initialJobId}`).then(setJob).catch((requestError) => setError(requestError.message));
+  }, [open, initialJobId]);
 
   useEffect(() => {
     if (!job || !PROCESSING_STATUSES.includes(job.stages.look.status)) return undefined;
@@ -93,6 +100,15 @@ export function OutfitBuilder({ open, onClose, items, onCreated }) {
     finally { setBusy(false); }
   };
 
+  const cancel = async () => {
+    setBusy(true); setError("");
+    try {
+      await api(`${API}/${job.id}`, { method: "DELETE" });
+      reset();
+    } catch (requestError) { setError(requestError.message); }
+    finally { setBusy(false); }
+  };
+
   const approve = async () => {
     setBusy(true); setError("");
     try {
@@ -108,6 +124,7 @@ export function OutfitBuilder({ open, onClose, items, onCreated }) {
   const isProcessing = status && PROCESSING_STATUSES.includes(status);
   const isReview = status === "review";
   const isFailed = status === "failed";
+  const isCancelled = status === "cancelled";
 
   return (
     <div className="import-popover-backdrop" data-open={open} onMouseDown={(event) => event.target === event.currentTarget && close()}>
@@ -131,11 +148,27 @@ export function OutfitBuilder({ open, onClose, items, onCreated }) {
         ) : !job ? (
           <>
             {items.length ? (
-              <div className="look-picker-grid">
-                {items.map((item) => (
-                  <LookPickerTile key={item.id} item={item} selected={selectedIds.includes(item.id)} onToggle={toggleItem} />
-                ))}
-              </div>
+              <>
+                <WardrobeFilters
+                  itemCount={items.length}
+                  activeType={filters.activeType}
+                  onChooseType={filters.setActiveType}
+                  availableTags={filters.availableTags}
+                  activeTags={filters.activeTags}
+                  onToggleTag={filters.toggleTag}
+                  activeColor={filters.activeColor}
+                  onColorChange={filters.setActiveColor}
+                  activeSeason={filters.activeSeason}
+                  onSeasonChange={filters.setActiveSeason}
+                />
+                {filters.visibleItems.length ? (
+                  <div className="look-picker-grid">
+                    {filters.visibleItems.map((item) => (
+                      <LookPickerTile key={item.id} item={item} selected={selectedIds.includes(item.id)} onToggle={toggleItem} />
+                    ))}
+                  </div>
+                ) : <p className="import-card__detail">No pieces match these filters.</p>}
+              </>
             ) : <p className="import-card__detail">Import a few pieces first, then come back to style a look.</p>}
             {!!selectedIds.length && (
               <div className="look-chip-row">
@@ -166,6 +199,9 @@ export function OutfitBuilder({ open, onClose, items, onCreated }) {
           <div className="import-progress is-indeterminate">
             <div className="import-progress__meta"><span>Styling your look</span></div>
             <div className="import-progress__track"><div className="import-progress__bar" /></div>
+            <div className="import-actions">
+              <button className="import-button" disabled={busy} onClick={cancel}><X size={14} /> Cancel</button>
+            </div>
           </div>
         ) : isReview ? (
           <div className="import-editor">
@@ -184,11 +220,11 @@ export function OutfitBuilder({ open, onClose, items, onCreated }) {
               </div>
             </div>
           </div>
-        ) : isFailed ? (
+        ) : isFailed || isCancelled ? (
           <div className="import-drop-target import-setup-warning">
             <WarningCircle size={30} />
-            <h2>That didn't work</h2>
-            <p>{job.stages.look.error}</p>
+            <h2>{isCancelled ? "Cancelled" : "That didn't work"}</h2>
+            <p>{isCancelled ? "You cancelled this look before it finished." : job.stages.look.error}</p>
             <div className="import-actions">
               <button className="import-button" disabled={busy} onClick={reject}><Trash size={14} /> Discard</button>
               <button className="import-button import-button--primary" disabled={busy} onClick={regenerate}><ArrowCounterClockwise size={14} /> Retry</button>

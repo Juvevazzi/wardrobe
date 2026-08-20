@@ -118,6 +118,48 @@ button { font: inherit; }
   cursor: pointer;
 }
 
+.outfit-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 24px;
+  padding: 0;
+  list-style: none;
+}
+
+.outfit-job-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.outfit-job-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex: 0 0 auto;
+}
+
+.outfit-job-thumb--placeholder { background: rgba(25, 25, 25, .06); }
+
+.outfit-job-name {
+  flex: 1;
+  font-size: 13px;
+}
+
+.outfit-job-status {
+  font-size: 11px;
+  text-transform: capitalize;
+  color: var(--muted);
+}
+
+.outfit-job-status.is-failed,
+.outfit-job-status.is-cancelled { color: var(--accent); }
+
 .outfits-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -127,6 +169,7 @@ button { font: inherit; }
 .outfit-card { min-width: 0; }
 
 .outfit-card-photo {
+  position: relative;
   aspect-ratio: 1;
   overflow: hidden;
   background: rgba(25, 25, 25, .04);
@@ -137,6 +180,25 @@ button { font: inherit; }
   height: 100%;
   object-fit: cover;
 }
+
+.outfit-card-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: #fff;
+  background: rgba(20, 20, 20, .55);
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.outfit-card-delete:hover,
+.outfit-card-delete:focus-visible { background: rgba(20, 20, 20, .8); outline: none; }
 
 .outfit-card-body { padding: 12px 2px 0; }
 

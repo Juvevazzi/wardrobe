@@ -8,35 +8,11 @@ import { ErrorBoundary } from "./ErrorBoundary.jsx";
 import { CATEGORIES, SEASONS } from "./shared/categories.mjs";
 import { wardrobeGaps } from "./shared/wardrobe-insights.mjs";
 import { suggestOutfitsForWeather, weatherBucket } from "./shared/weather.mjs";
-
-const TYPES = [{ id: "all", label: "All" }, ...CATEGORIES];
-
-const TYPE_MAP = Object.fromEntries(TYPES.map((type) => [type.id, type]));
-const TYPE_ORDER = Object.fromEntries(TYPES.slice(1).map((type, index) => [type.id, index]));
-
-const SEASON_FILTERS = [{ id: "all", label: "All" }, ...SEASONS, { id: "unsorted", label: "Unsorted" }];
+import { TYPES, TYPE_MAP, colorDistance, useWardrobeFilters } from "./shared/wardrobe-filters.mjs";
+import { WardrobeFilters } from "./WardrobeFilters.jsx";
 
 function rgbToHex(red, green, blue) {
   return `#${[red, green, blue].map((value) => Math.max(0, Math.min(255, value)).toString(16).padStart(2, "0")).join("")}`;
-}
-
-function hexToRgb(hex) {
-  const value = (hex || "").replace("#", "");
-  return {
-    red: Number.parseInt(value.slice(0, 2), 16) || 0,
-    green: Number.parseInt(value.slice(2, 4), 16) || 0,
-    blue: Number.parseInt(value.slice(4, 6), 16) || 0,
-  };
-}
-
-const COLOR_MATCH_THRESHOLD = 60;
-
-function colorDistance(first, second) {
-  return Math.sqrt(
-    ((first.red - second.red) ** 2)
-    + ((first.green - second.green) ** 2)
-    + ((first.blue - second.blue) ** 2),
-  );
 }
 
 function extractPalette(image) {
@@ -631,7 +607,7 @@ function useWeather() {
   return weather;
 }
 
-function OutfitCard({ outfit, itemsById }) {
+function OutfitCard({ outfit, itemsById, onDelete }) {
   const garments = (outfit.garmentIds || []).map((id) => itemsById[id]).filter(Boolean);
 
   return (
@@ -643,6 +619,9 @@ function OutfitCard({ outfit, itemsById }) {
           sizes="(max-width: 860px) 50vw, 320px"
           breakpoints={[240, 320, 480, 640]}
         />
+        <button type="button" className="outfit-card-delete" onClick={() => onDelete(outfit.id)} aria-label="Delete outfit">
+          <Trash size={15} weight="regular" aria-hidden="true" />
+        </button>
       </div>
       <div className="outfit-card-body">
         <h3>{outfit.name || "Untitled outfit"}</h3>
@@ -657,12 +636,69 @@ function OutfitCard({ outfit, itemsById }) {
   );
 }
 
+const OUTFIT_JOB_API = "/api/import/outfit-jobs";
+const OUTFIT_JOB_PROCESSING = ["queued", "pending", "processing"];
+
+function OutfitJobRow({ job, onCancel, onReview }) {
+  const status = job.stages.look.status;
+  return (
+    <li className="outfit-job-row">
+      {job.stages.look.assetUrl
+        ? <img className="outfit-job-thumb" src={job.stages.look.assetUrl} alt="" />
+        : <span className="outfit-job-thumb outfit-job-thumb--placeholder" aria-hidden="true" />}
+      <span className="outfit-job-name">{job.name || "Untitled look"}</span>
+      <span className={`outfit-job-status is-${status}`}>{status}</span>
+      {status === "review" && <button type="button" className="secondary-button" onClick={() => onReview(job.id)}>Review</button>}
+      {OUTFIT_JOB_PROCESSING.includes(status) && <button type="button" className="secondary-button" onClick={() => onCancel(job.id)}>Cancel</button>}
+    </li>
+  );
+}
+
+function OutfitQueue({ onReview }) {
+  const [jobs, setJobs] = useState([]);
+
+  useEffect(() => {
+    let active = true;
+    const load = () => fetch(OUTFIT_JOB_API, { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data) => { if (active) setJobs(data); })
+      .catch(() => {});
+    load();
+    const timer = setInterval(load, 2000);
+    return () => { active = false; clearInterval(timer); };
+  }, []);
+
+  const cancelJob = async (id) => {
+    setJobs((current) => current.filter((job) => job.id !== id));
+    await fetch(`${OUTFIT_JOB_API}/${id}`, { method: "DELETE" }).catch(() => {});
+  };
+
+  if (!jobs.length) return null;
+
+  return (
+    <ul className="outfit-queue" aria-label="Outfit generation queue">
+      {jobs.map((job) => <OutfitJobRow key={job.id} job={job} onCancel={cancelJob} onReview={onReview} />)}
+    </ul>
+  );
+}
+
 function OutfitsView({ items }) {
   const [outfits, setOutfits] = useState(null);
   const [error, setError] = useState("");
   const [weatherFilter, setWeatherFilter] = useState(false);
   const [builderOpen, setBuilderOpen] = useState(false);
+  const [reviewJobId, setReviewJobId] = useState(null);
   const weather = useWeather();
+
+  const openBuilder = (jobId = null) => {
+    setReviewJobId(jobId);
+    setBuilderOpen(true);
+  };
+
+  const closeBuilder = () => {
+    setBuilderOpen(false);
+    setReviewJobId(null);
+  };
 
   useEffect(() => {
     fetch("/api/import/outfits", { cache: "no-store" })
@@ -676,6 +712,17 @@ function OutfitsView({ items }) {
 
   const itemsById = useMemo(() => Object.fromEntries(items.map((item) => [item.id, item])), [items]);
 
+  const deleteOutfit = async (id) => {
+    try {
+      const response = await fetch(`/api/import/outfits/${id}`, { method: "DELETE" });
+      if (!response.ok && response.status !== 404) throw new Error("Could not delete the outfit.");
+    } catch (requestError) {
+      setError(requestError.message);
+      return;
+    }
+    setOutfits((current) => (current || []).filter((outfit) => outfit.id !== id));
+  };
+
   const visibleOutfits = useMemo(() => {
     if (!outfits) return [];
     if (!weatherFilter || typeof weather !== "object" || !weather?.bucket) return outfits;
@@ -688,14 +735,16 @@ function OutfitsView({ items }) {
   return (
     <>
       <div className="outfits-toolbar">
-        <button type="button" className="secondary-button" onClick={() => setBuilderOpen(true)}>Create a look</button>
+        <button type="button" className="secondary-button" onClick={() => openBuilder()}>Create a look</button>
       </div>
       <OutfitBuilder
         open={builderOpen}
-        onClose={() => setBuilderOpen(false)}
+        onClose={closeBuilder}
         items={items}
+        initialJobId={reviewJobId}
         onCreated={(outfit) => setOutfits((current) => [outfit, ...(current || [])])}
       />
+      <OutfitQueue onReview={openBuilder} />
       {typeof weather === "object" && weather?.bucket && !!outfits.length && (
         <label className="weather-toggle">
           <input type="checkbox" checked={weatherFilter} onChange={(event) => setWeatherFilter(event.target.checked)} />
@@ -705,7 +754,7 @@ function OutfitsView({ items }) {
       {outfits.length
         ? (
           <section className="outfits-grid" aria-label="Generated outfits">
-            {visibleOutfits.map((outfit) => <OutfitCard key={outfit.id} outfit={outfit} itemsById={itemsById} />)}
+            {visibleOutfits.map((outfit) => <OutfitCard key={outfit.id} outfit={outfit} itemsById={itemsById} onDelete={deleteOutfit} />)}
           </section>
         )
         : <p className="status empty">No outfits yet. Create one above, or ask the generate-outfits Codex skill to curate some from your wardrobe.</p>}
@@ -717,10 +766,6 @@ function Wardrobe() {
   const [items, setItems] = useState([]);
   const [view, setView] = useState("wardrobe");
   const [showGaps, setShowGaps] = useState(false);
-  const [activeType, setActiveType] = useState("all");
-  const [activeTags, setActiveTags] = useState([]);
-  const [activeColor, setActiveColor] = useState(null);
-  const [activeSeason, setActiveSeason] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -740,34 +785,12 @@ function Wardrobe() {
 
   const selectedItem = items.find((item) => item.id === selectedId) || null;
 
-  const availableTags = useMemo(() => [...new Set(items.flatMap((item) => item.tags || []))].sort(), [items]);
-
-  const visibleItems = useMemo(() => {
-    let filtered = activeType === "all" ? items : items.filter((item) => item.part === activeType);
-    if (activeTags.length) filtered = filtered.filter((item) => activeTags.every((tag) => (item.tags || []).includes(tag)));
-    if (activeColor) {
-      const target = hexToRgb(activeColor);
-      filtered = filtered.filter((item) => [item.color, item.secondaryColor].filter(Boolean)
-        .some((color) => colorDistance(hexToRgb(color), target) <= COLOR_MATCH_THRESHOLD));
-    }
-    if (activeSeason === "unsorted") filtered = filtered.filter((item) => !item.season);
-    else if (activeSeason !== "all") filtered = filtered.filter((item) => item.season === activeSeason);
-    return [...filtered].sort((a, b) => {
-      if (activeType === "all") {
-        const typeDifference = (TYPE_ORDER[a.part] ?? 99) - (TYPE_ORDER[b.part] ?? 99);
-        if (typeDifference) return typeDifference;
-      }
-      return a.id.localeCompare(b.id);
-    });
-  }, [activeType, activeTags, activeColor, activeSeason, items]);
+  const filters = useWardrobeFilters(items);
+  const { activeType, activeTags, activeColor, activeSeason, availableTags, visibleItems } = filters;
 
   const chooseType = (typeId) => {
-    setActiveType(typeId);
+    filters.setActiveType(typeId);
     setSelectedId(null);
-  };
-
-  const toggleTag = (tag) => {
-    setActiveTags((current) => current.includes(tag) ? current.filter((existing) => existing !== tag) : [...current, tag]);
   };
 
   const handleImportFile = async (event) => {
@@ -871,56 +894,18 @@ function Wardrobe() {
                 </div>
               </div>
               {showGaps && <GapsPanel items={items} />}
-              <nav className="category-nav" aria-label="Filter wardrobe by item type">
-                {TYPES.map((type) => (
-                  <button
-                    key={type.id}
-                    type="button"
-                    className={activeType === type.id ? "active" : ""}
-                    onClick={() => chooseType(type.id)}
-                    aria-pressed={activeType === type.id}
-                  >
-                    {type.label}
-                  </button>
-                ))}
-              </nav>
-              {!!items.length && (
-                <div className="search-filters">
-                  {!!availableTags.length && (
-                    <div className="tag-filter" aria-label="Filter by detail tag">
-                      {availableTags.map((tag) => (
-                        <button
-                          key={tag}
-                          type="button"
-                          className={activeTags.includes(tag) ? "active" : ""}
-                          onClick={() => toggleTag(tag)}
-                          aria-pressed={activeTags.includes(tag)}
-                        >
-                          {tag}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <label className="color-filter">
-                    <span>Color</span>
-                    <input type="color" value={activeColor || "#9a9286"} onChange={(event) => setActiveColor(event.target.value)} aria-label="Filter by similar color" />
-                    {activeColor && <button type="button" onClick={() => setActiveColor(null)}>Clear</button>}
-                  </label>
-                  <div className="tag-filter" aria-label="Filter by season">
-                    {SEASON_FILTERS.map((season) => (
-                      <button
-                        key={season.id}
-                        type="button"
-                        className={activeSeason === season.id ? "active" : ""}
-                        onClick={() => setActiveSeason(season.id)}
-                        aria-pressed={activeSeason === season.id}
-                      >
-                        {season.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <WardrobeFilters
+                itemCount={items.length}
+                activeType={activeType}
+                onChooseType={chooseType}
+                availableTags={availableTags}
+                activeTags={activeTags}
+                onToggleTag={filters.toggleTag}
+                activeColor={activeColor}
+                onColorChange={filters.setActiveColor}
+                activeSeason={activeSeason}
+                onSeasonChange={filters.setActiveSeason}
+              />
             </header>
 
             {error && <p className="status error">{error}</p>}
